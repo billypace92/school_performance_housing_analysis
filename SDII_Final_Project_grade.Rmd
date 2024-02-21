@@ -1,0 +1,637 @@
+---
+title: "Final Project Code"
+author: "William Pacetti"
+date: "2023-03-27"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+load data and libraries
+
+```{r}
+library(boot)
+library(caret)
+library(leaps)
+library(tree)
+library(randomForest)
+library(gbm)
+library(MASS)
+
+
+set.seed(1)
+
+data1 = miamihousing_points_ES
+
+head(data1)
+```
+
+check for missing data
+
+```{r}
+
+sum(is.na(data1))
+
+
+```
+
+
+summary of data
+
+```{r}
+
+summary(data1)
+
+```
+
+
+```{r}
+
+data1$ES_PERC_MIN_STU[is.na(data1$ES_PERC_MIN_STU)] <- mean(data1$ES_PERC_MIN_STU,na.rm = TRUE)
+
+data1$ES_PERC_ECO_DIS[is.na(data1$ES_PERC_ECO_DIS)] <- mean(data1$ES_PERC_ECO_DIS,na.rm = TRUE)
+
+sum(is.na(data1))
+
+```
+
+
+
+look at correlations
+
+
+```{r}
+
+
+attach(data1)
+
+library(ggplot2)
+
+library(dplyr)
+
+library(ISLR)
+
+library(reshape2)
+
+cormat <- round(cor(data1),2)
+head(cormat)
+
+melted_cormat <- melt(cormat)
+head(melted_cormat)
+
+library(ggplot2)
+ggplot(data = melted_cormat, aes(x=Var1, y=Var2, fill=value)) + 
+  geom_tile()
+
+
+# Get lower triangle of the correlation matrix
+get_lower_tri<-function(cormat){
+  cormat[upper.tri(cormat)] <- NA
+  return(cormat)
+}
+# Get upper triangle of the correlation matrix
+get_upper_tri <- function(cormat){
+  cormat[lower.tri(cormat)]<- NA
+  return(cormat)
+}
+
+upper_tri <- get_upper_tri(cormat)
+upper_tri
+
+# Melt the correlation matrix
+library(reshape2)
+melted_cormat <- melt(upper_tri, na.rm = TRUE)
+# Heatmap
+library(ggplot2)
+ggplot(data = melted_cormat, aes(Var2, Var1, fill = value))+
+  geom_tile(color = "white")+
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white", 
+                       midpoint = 0, limit = c(-1,1), space = "Lab", 
+                       name="Pearson\nCorrelation") +
+  theme_minimal()+ 
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, 
+                                   size = 12, hjust = 1))+
+  coord_fixed()
+
+
+reorder_cormat <- function(cormat){
+  # Use correlation between variables as distance
+  dd <- as.dist((1-cormat)/2)
+  hc <- hclust(dd)
+  cormat <-cormat[hc$order, hc$order]
+}
+
+
+# Reorder the correlation matrix
+cormat <- reorder_cormat(cormat)
+upper_tri <- get_upper_tri(cormat)
+# Melt the correlation matrix
+melted_cormat <- melt(upper_tri, na.rm = TRUE)
+
+
+
+
+
+
+
+# Create a ggheatmap
+ggheatmap <- ggplot(melted_cormat, aes(Var2, Var1, fill = value))+
+  geom_tile(color = "white")+
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white", 
+                       midpoint = 0, limit = c(-1,1), space = "Lab", 
+                       name="Pearson\nCorrelation") +
+  theme_minimal()+ # minimal theme
+  theme(axis.text.x = element_text(angle = 60, vjust = 1, 
+                                   size = 12, hjust = 1))+
+  coord_fixed()
+# Print the heatmap
+print(ggheatmap)
+
+
+
+ggheatmap + 
+  geom_text(aes(Var2, Var1, label = value), color = "black", size = 4) +
+  theme(
+    axis.title.x = element_blank(),
+    axis.title.y = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.border = element_blank(),
+    panel.background = element_blank(),
+    axis.ticks = element_blank(),
+    legend.justification = c(1, 0),
+    legend.position = c(0.6, 0.7),
+    legend.direction = "horizontal")+
+  guides(fill = guide_colorbar(barwidth = 7, barheight = 1,
+                               title.position = "top", title.hjust = 0.5))
+
+
+cordata = as.data.frame(cormat)
+cordata
+```
+
+
+```{r}
+
+ggplot(data = data1, aes(x = ES_MEAN_GRADE_2016_2022)) +
+    geom_histogram(bins = 10)
+
+
+```
+
+```{r}
+
+ggplot(data = data1, aes(x = ES_PERC_ECO_DIS)) +
+    geom_histogram(bins = 10)
+
+
+```
+
+
+```{r}
+
+ggplot(data = data1, aes(x = ES_PERC_MIN_STU)) +
+    geom_histogram(bins = 10)
+
+
+```
+
+
+```{r}
+
+ggplot(data = data1, aes(x = ES_MEAN_GRADE_2016_2022)) +
+    geom_histogram(bins = 10)
+
+```
+
+
+
+```{r}
+
+ggplot(data = data1, aes(x = ES_PERC_ECO_DIS , y = ES_MEAN_GRADE_2016_2022)) + geom_point(alpha = 0.5) +
+    geom_smooth()
+
+```
+
+```{r}
+
+ggplot(data = data1, aes(x = ES_PERC_ECO_DIS , y = ES_PERC_MIN_STU)) + geom_point(alpha = 0.5) +
+    geom_smooth()
+
+
+```
+
+
+```{r}
+
+library(mlr)
+
+library(mlr3)
+
+library(mlr3data)
+
+data1 = normalizeFeatures(
+  data1,
+  method = "standardize",
+  cols = NULL,
+  range = c(0, 1),
+  on.constant = "quiet"
+)
+
+
+```
+
+
+
+divide data into training and testing
+
+```{r}
+
+sample = sample(c(TRUE, FALSE), nrow(data1), replace=TRUE, prob=c(0.8,0.2))
+
+train = data1[sample,]
+
+test = data1[!sample,]
+
+dim(train)
+
+dim(test)
+
+```
+
+```{r}
+
+lm.all = lm(ES_MEAN_GRADE_2016_2022~.,data=train)
+
+summary(lm.all)
+
+
+```
+
+
+```{r}
+
+lm.allr2 = summary(lm.all)$adj.r.squared
+
+lm.allr2
+```
+
+
+
+let's predict on the test data and look at MSE.
+
+
+```{r}
+
+lm.allrmse = sqrt(mean((test$ES_MEAN_GRADE_2016_2022-predict.glm(lm.all,test))^2))
+
+
+lm.allrmse
+
+
+```
+
+model 1 has lower RMSE.
+
+
+
+let's see about adding in 10-fold cv.
+
+first for the lm.all model
+
+```{r}
+
+lm.all = glm(ES_MEAN_GRADE_2016_2022~., data=train)
+
+cv.lm.all = cv.glm(train,lm.all, K=10)
+
+```
+
+
+```{r}
+
+summary(cv.lm.all)
+
+cv.delta.all = cv.lm.all$delta
+
+cv.lm.allrmse= sqrt(sum(cv.delta.all)/2)
+
+cv.lm.allrmse
+```
+
+
+let's apply lasso.
+
+divide the data to apply lasso.
+
+
+```{r}
+
+library(glmnet)
+
+xtrain = subset(train, select = -c(ES_MEAN_GRADE_2016_2022))
+ytrain = subset(train, select = c(ES_MEAN_GRADE_2016_2022))
+
+xtest = subset(test, select = -c(ES_MEAN_GRADE_2016_2022))
+ytest = subset(test, select = c(ES_MEAN_GRADE_2016_2022))
+
+ytrain = as.numeric(unlist(ytrain))
+xtrain = data.matrix(xtrain, rownames.force = NA)
+
+ytest = as.numeric(unlist(ytest))
+xtest = data.matrix(xtest, rownames.force = NA)
+
+class(ytrain)
+class(xtrain)
+
+
+```
+
+
+build lasso model.
+
+```{r}
+
+set.seed(1)
+
+cv.out=cv.glmnet(xtrain, ytrain, alpha=1)
+
+par(mfrow=c(1,1))
+plot(cv.out)
+
+bestlam=cv.out$lambda.min
+bestlam
+
+
+```
+
+
+let's examine the coefficients.
+
+
+```{r}
+
+lassomodel=glmnet(xtrain,ytrain,alpha=1,lambda=bestlam)
+
+lasso.coef=predict(lassomodel,type="coefficients",s=bestlam)[1:20,]
+
+lasso.coef
+
+
+```
+
+
+let's calculate RMSE on validation set using best lambda.
+
+
+```{r}
+
+lasso.pred=predict(cv.out,s=bestlam ,newx=xtest)
+
+lassormse = sqrt(mean((lasso.pred-ytest)^2))
+
+
+lm.allrmse
+
+lassormse
+
+
+```
+
+
+
+lasso model has higher MSE than linear regression model (with all variables), but not by much.
+
+
+
+let's examine R2 for lasso model.
+
+
+```{r}
+
+lassomodel$dev.ratio
+
+```
+
+
+
+let's examine the data using random forest to see if we get similar results for RMSE.
+
+
+```{r}
+
+#set m=p/3 for regression
+
+m=round(21/3,0)
+m
+
+rf.data=randomForest(ES_MEAN_GRADE_2016_2022~. , data=train, ntrees=500, mtry=m,importance =T)
+rf.data
+
+```
+
+```{r}
+
+rf.datar2 = mean(rf.data$rsq)
+
+rf.datar2
+
+```
+
+
+
+with m=7, the model is able to explain 99.7% of variance for the training data. 
+
+
+```{r}
+
+# Performance on test set
+yhat.rf=predict(rf.data,newdata=test)
+
+
+plot1 = plot(yhat.rf, ytest)
+abline(0,1)
+plot1
+
+# Test RMSE
+rftestrmse = sqrt(mean((yhat.rf-ytest)^2))
+rftestrmse
+
+
+```
+
+which variables are most important?
+
+
+```{r}
+
+plot(rf.data)
+
+varImpPlot(rf.data)
+
+
+```
+
+
+let's examine which model has the lowest RMSE so far.
+
+
+```{r}
+
+
+RMSElist = list(lm.allrmse, lassormse, rftestrmse)
+
+
+which.min(RMSElist)
+
+
+```
+
+
+so far, Random Forest has best performance as model on test data.
+
+
+
+let's build a model using boosting to see if we have similar results for the importance of variables and test RMSE.
+
+
+```{r}
+
+boost.data=gbm(ES_MEAN_GRADE_2016_2022~. , data=train,distribution="gaussian", cv.folds = 10, n.trees=5000, interaction.depth=4)
+
+
+summary(boost.data)
+
+```
+
+total living area and distance to the ocean seem to be the most important variables in influencing sale price.
+
+let's look at performance on test RMSE.
+
+```{r}
+
+
+# Performance on test set
+yhat.boost=predict(boost.data,newdata=test)
+
+
+plot1 = plot(yhat.boost, ytest)
+abline(0,1)
+plot1
+
+# Test MSE
+boosttestrmse = sqrt(mean((yhat.boost-ytest)^2))
+
+boosttestrmse
+
+
+```
+
+calculate R^2
+
+```{r}
+
+y_test_mean = mean(ytest)
+
+tss = sum((ytest-y_test_mean)^2)
+
+rss = sum((yhat.boost-ytest)^2)
+
+boostr2 = 1 - (rss/tss)
+
+boostr2
+
+```
+
+
+let's compare to other models test RMSE.
+
+
+```{r}
+
+RMSElist = list(lm.allrmse, lassormse, rftestrmse, boosttestrmse)
+
+
+which.min(RMSElist)
+
+
+```
+
+boosting has a lower test RMSE than the rest of the models.
+
+
+let's build a model using bagging to see if there's any improvement on test RMSE.
+
+
+```{r}
+
+bag.data=randomForest(ES_MEAN_GRADE_2016_2022~. ,data=train, mtry=20,importance=T)
+
+bag.data
+
+```
+
+```{r}
+
+# Performance on test set
+yhat.bag=predict(bag.data,newdata=test)
+
+
+plot1 = plot(yhat.bag, ytest)
+abline(0,1)
+plot1
+
+# Test MSE
+bagtestrmse = sqrt(mean((yhat.bag-ytest)^2))
+bagtestrmse
+
+
+```
+
+
+
+
+```{r}
+
+mean(bag.data$rsq)
+
+```
+
+
+
+let's see if importance of variables is similar to other decision tree models.
+
+```{r}
+
+plot(bag.data)
+
+varImpPlot(bag.data)
+
+
+```
+
+
+
+let's compare RMSE on test sets for models
+
+
+```{r}
+
+RMSElist = list(lm.allrmse, lassormse, rftestrmse, boosttestrmse, bagtestrmse)
+
+which.min(RMSElist)
+
+
+```
+
+it seems that bagging results in the lowest RMSE on the test set.
+
+
+```{r}
+
+
+
+
+```
+
